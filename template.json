@@ -1,0 +1,850 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "location": {
+            "type": "string",
+            "metadata": {
+                "description": "resource location"
+            }
+        },
+        "storageAccounttype": {
+            "type": "string",
+            "defaultValue": "Standard_LRS",
+            "allowedValues": [
+                "Standard_LRS",
+                "Standard_ZRS",
+                "Standard_GRS",
+                "Standard_RA-GRS",
+                "Premium_LRS"
+            ]
+        },
+        "containerPrefix": {
+            "type": "string",
+            "defaultValue": "logs",
+            "metadata": {
+                "description": "containers name"
+            }
+        },
+        "adminUsername": {
+            "type": "string",
+            "defaultValue":"vmadmin",
+            "metadata": {
+                "description": "Username for VM"
+            }
+        },
+        "adminPassword": {
+            "type": "securestring",
+            "defaultValue":"Xenapp@421301",
+            "metadata": {
+                "description":"password for VM"
+            }
+        },
+
+        "vmsize": {
+            "type": "string",
+            "defaultValue": "Standard_DS1_V2",
+            "allowedValues": [
+                "Standard_DS1_V2",
+                "Standard_DS2_V2",
+                "Standard_DS3_V2",
+                "Standard_DS4_V2"
+            ],
+            "metadata": {
+                "description": "Size of VM within eastus region"
+        }
+     },
+     "WindowsOSversion": {
+            "type": "string",
+            "defaultValue": "2016-Datacenter",
+            "allowedValues": [
+                "2016-Datacenter",
+                "2019-Datacenter",
+                "2012-Datacenter"
+            ],
+            "metadata": {
+                "description": "OS version for all VM's"
+            }
+     }
+ },
+    "functions":[],
+    "variables": {
+        "pubip01": "pubip-LB01",
+        "nsg01": "webnsg",
+        "nsg02": "appnsg",
+        "nsg03": "dbnsg",
+        "vnet01":"vnet-3tier",
+        "nic01": "web01-ip",
+        "nic02": "web02-ip",
+        "nic03": "app01-ip",
+        "nic04": "app02-ip",
+        "nic05": "db01-ip",
+        "nic06": "db02-ip",
+        "LB01": "LB-Ext-01",
+        "LB02": "LB-Int-02",
+        "LB03": "LB-Int-03"
+
+    },
+    "resources": [{
+     "type": "Microsoft.Storage/storageAccounts",
+     "apiVersion": "2019-06-01",
+     "name": "[concat('sa2021',uniquestring(resourcegroup().id))]",
+     "location": "[parameters('location')]",
+     "kind": "Storage",
+     "sku": {
+         "name": "[parameters('storageAccounttype')]",
+         "tier": "Standard"
+     }
+
+    },
+    {
+        "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+        "apiVersion": "2019-06-01",
+        "name": "[concat('sa2021',uniqueString(resourceGroup().id),'/default/',parameters('containerPrefix'), copyIndex('copycontainers', 1))]",
+        "copy": {
+            "name": "copycontainers",
+            "count": 5
+        },
+        "dependsOn": [
+            "[resourceId('Microsoft.Storage/storageAccounts', concat('sa2021',uniquestring(resourcegroup().id)))]"
+        ]
+    },
+    {
+         "type": "Microsoft.Network/publicIPAddresses",
+         "apiVersion": "2019-06-01",
+         "name": "[variables('pubip01')]",
+         "location": "[parameters('location')]",
+         "sku": {
+             "name": "Standard"
+         },
+         "properties": {
+             "publicIPAllocationMethod": "Static"
+         }
+    },
+    {
+        "type": "Microsoft.Network/networkSecurityGroups",
+        "apiVersion": "2019-06-01",
+        "name": "[variables('nsg01')]",
+        "location": "[parameters('location')]",
+        "properties": {
+            "securityRules": [
+                {
+                    "name": "rdp-allow-01",
+                    "properties": {
+                        "access": "Allow",
+                        "sourceAddressPrefix": "*",
+                        "sourcePortRange": "*",
+                        "destinationAddressPrefix": "*",
+                        "destinationPortRange": "3389",
+                        "direction": "Inbound",
+                        "priority": 450,
+                        "protocol": "Tcp"
+                    }
+                }
+            ]
+        }
+    },
+    {
+        "type": "Microsoft.Network/networkSecurityGroups",
+        "apiVersion": "2019-06-01",
+        "name": "[variables('nsg02')]",
+        "location": "[parameters('location')]",
+        "properties": {
+            "securityRules": [
+                {
+                    "name": "rdp-allow-02",
+                    "properties": {
+                        "access" : "Allow",
+                        "protocol": "Tcp",
+                        "priority": 450,
+                        "direction": "Inbound",
+                        "destinationAddressPrefix": "*",
+                        "destinationPortRange": "3389",
+                        "sourceAddressPrefix": "*",
+                        "sourcePortRange": "*"
+                    }
+                }
+            ]
+        }
+    },
+    {
+        "type": "Microsoft.Network/networkSecurityGroups",
+        "apiVersion": "2019-06-01",
+        "name": "[variables('nsg03')]",
+        "location": "[parameters('location')]",
+        "properties": {
+            "securityRules": [
+                {
+                    "name": "rdp-deny-02",
+                    "properties": {
+                        "access" : "Deny",
+                        "protocol": "Tcp",
+                        "priority": 450,
+                        "direction": "Inbound",
+                        "destinationAddressPrefix": "*",
+                        "destinationPortRange": "3389",
+                        "sourceAddressPrefix": "*",
+                        "sourcePortRange": "*"
+                    }
+                }
+            ]
+        }
+    },
+    {
+        "type": "Microsoft.Network/virtualNetworks",
+        "apiVersion": "2019-06-01",
+        "name": "[variables('vnet01')]",
+        "location": "[parameters('location')]",
+        "dependsOn": [
+            "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsg01'))]",
+            "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsg02'))]",
+            "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsg03'))]"
+        ],
+        "properties": {
+            "addressSpace": {
+                "addressPrefixes": [
+                    "10.10.0.0/16"
+                ]                
+            },
+            "subnets": [
+                {
+                    "name": "websub",
+                    "properties": {
+                        "addressPrefix": "10.10.1.0/24",
+                        "networkSecurityGroup": {
+                            "id": "[resourceId('Microsoft.Network/networkSecurityGroups',variables('nsg01'))]"
+                        }
+                    }
+                    
+                },
+                {
+                    "name": "appsub",
+                    "properties": {
+                        "addressPrefix": "10.10.2.0/24",
+                        "networkSecurityGroup": {
+                            "id": "[resourceId('Microsoft.Network/networkSecurityGroups',variables('nsg02'))]"
+                        }
+                    }
+                },
+                {
+                    "name": "dbsub",
+                    "properties": {
+                        "addressPrefix": "10.10.3.0/24",
+                        "networkSecurityGroup": {
+                            "id": "[resourceId('Microsoft.Network/networkSecurityGroups',variables('nsg03'))]"
+                        }
+                    }
+                }
+            ]
+        }     
+},
+{
+    "type": "Microsoft.Network/networkInterfaces",
+    "apiVersion": "2019-06-01",
+    "name": "[variables('nic01')]",
+    "location":"[parameters('location')]",
+    "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnet01'))]"
+    ],
+    "properties": {
+        "ipConfigurations": [
+            {
+                "name": "config01",
+                "properties": {
+                    "privateIPAllocationMethod": "Dynamic",
+                    "subnet": {
+                        "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets','websub')]"
+                    },
+                    "loadBalancerBackendAddressPools": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools/',variables('LB01'),'BE01')]"
+                        }
+                    ],
+                    "loadBalancerInboundNatRules": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/loadBalancers/inboundNatRules/',variables('LB01'),'Nat01')]"
+                        }
+                    ]
+                }                
+            }            
+        ]        
+    }
+},
+{
+    "type": "Microsoft.Network/networkInterfaces",
+    "apiVersion": "2019-06-01",
+    "name": "[variables('nic02')]",
+    "location":"[parameters('location')]",
+    "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnet01'))]"
+    ],
+    "properties": {
+        "ipConfigurations": [
+            {
+                "name": "config02",
+                "properties": {
+                    "privateIPAllocationMethod": "Dynamic",
+                    "subnet": {
+                        "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets','websub')]"
+                    },
+                     "loadBalancerBackendAddressPools": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools/',variables('LB01'),'BE01')]"
+                        }
+                    ],
+                    "loadBalancerInboundNatRules": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/loadBalancers/inboundNatRules/',variables('LB01'),'Nat02')]"
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+},
+{
+    "type": "Microsoft.Network/networkInterfaces",
+    "apiVersion": "2019-06-01",
+    "name": "[variables('nic03')]",
+    "location":"[parameters('location')]",
+    "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnet01'))]"
+    ],
+    "properties": {
+        "ipConfigurations": [
+            {
+                "name": "config03",
+                "properties": {
+                    "privateIPAllocationMethod": "Dynamic",
+                    "subnet": {
+                        "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets','appsub')]"
+                    },
+                    "loadBalancerBackendAddressPools": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools/',variables('LB02'),'BE02')]"
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+},
+{
+    "type": "Microsoft.Network/networkInterfaces",
+    "apiVersion": "2019-06-01",
+    "name": "[variables('nic04')]",
+    "location":"[parameters('location')]",
+    "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnet01'))]"
+    ],
+    "properties": {
+        "ipConfigurations": [
+            {
+                "name": "config04",
+                "properties": {
+                    "privateIPAllocationMethod": "Dynamic",
+                    "subnet": {
+                        "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets','appsub')]"
+                    },
+                    "loadBalancerBackendAddressPools": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools/',variables('LB02'),'BE02')]"
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+},
+{
+    "type": "Microsoft.Network/networkInterfaces",
+    "apiVersion": "2019-06-01",
+    "name": "[variables('nic05')]",
+    "location":"[parameters('location')]",
+    "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnet01'))]"
+    ],
+    "properties": {
+        "ipConfigurations": [
+            {
+                "name": "config01",
+                "properties": {
+                    "privateIPAllocationMethod": "Dynamic",
+                    "subnet": {
+                        "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets','dbsub')]"
+                    },
+                    "loadBalancerBackendAddressPools": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools/',variables('LB03'),'BE03')]"
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+},
+{
+    "type": "Microsoft.Network/networkInterfaces",
+    "apiVersion": "2019-06-01",
+    "name": "[variables('nic06')]",
+    "location":"[parameters('location')]",
+    "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnet01'))]"
+    ],
+    "properties": {
+        "ipConfigurations": [
+            {
+                "name": "config06",
+                "properties": {
+                    "privateIPAllocationMethod": "Dynamic",
+                    "subnet": {
+                        "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets','dbsub')]"
+                    },
+                    "loadBalancerBackendAddressPools": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools/',variables('LB03'),'BE03')]"
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+},
+{
+    "type": "Microsoft.Network/loadBalancers",
+    "apiVersion": "2019-06-01",
+    "name": "[variables('LB01')]",
+    "location": "[parameters('location')]",
+    "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('pubip01'))]"
+    ],
+    "sku": {
+        "name": "Standard"
+    },
+    "properties": {
+        "frontendIPConfigurations": [
+            {
+                "name": "FE01",
+                "properties": {
+                    "publicIPAddress": {
+                        "id": "[resourceId('Microsoft.Network/publicIPAddresses',variables('pubip01'))]"
+                    }
+                }
+            }
+        ],
+        "backendAddressPools": [
+            {
+                "name": "BE01"
+            }
+        ],
+        "inboundNatRules": [
+            {
+                "name": "Nat01",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations/',variables('LB01'),'FE01')]"
+                    },
+                    "protocol": "Tcp",
+                    "frontendPort": 50001,
+                    "backendPort": 3389,
+                    "idleTimeoutInMinutes": 5,
+                    "enableFloatingIP": false                    
+                }
+            },
+            {
+                "name": "Nat02",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations/',variables('LB01'),'FE01')]"
+                    },
+                    "protocol": "Tcp",
+                    "enableFloatingIP": false,
+                    "frontendPort": 50002,
+                    "backendPort": 3389,
+                    "idleTimeoutInMinutes": 5
+                }
+            }
+        ],
+        "loadBalancingRules": [
+            {
+                "name": "LB01-rule01",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations/',variables('LB01'),'FE01')]"
+                    },
+                    "protocol": "All",
+                    "frontendPort": 80,
+                    "backendPort": 80,
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 10,
+                    "backendAddressPool": {
+                        "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools/',variables('LB01'),'BE01')]"
+                    },
+                    "probe": {
+                        "id": "[resourceId('Microsoft.Network/loadBalancers/probes/',variables('LB01'),'PB01')]"
+                    }
+                    
+                }
+            }
+        ],
+        "probes": [
+            {
+                "name": "PB01",
+                "properties": {
+                    "protocol": "Http",
+                    "numberOfProbes": 2,
+                    "port": 80,
+                    "intervalInSeconds": 10                    
+                }
+            }
+        ]
+    }
+},
+{
+    "type": "Microsoft.Network/loadBalancers",
+    "apiVersion": "2019-06-01",
+    "name": "[variables('LB02')]",
+    "location": "[parameters('location')]",
+    "sku": {
+        "name": "Standard"
+    },
+    "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnet01'))]"
+    ],
+    "properties": {
+        "frontendIPConfigurations": [
+            {
+                "name": "FE02",
+                "properties": {
+                    "subnet": {
+                        "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets/',variables('vnet01'),'appsub')]"
+                    }
+                }
+            }
+        ],
+        "backendAddressPools": [
+            {
+                "name": "BE02"
+            }
+        ],
+        "loadBalancingRules": [
+            {
+                "name": "LB02-rule01",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations/',variables('LB02'),'FE02')]"
+                    },
+                    "protocol": "All",
+                    "frontendPort": 80,
+                    "backendPort": 80,
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 10,
+                    "backendAddressPool":{
+                        "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools/',variables('LB02'),'BE02')]"
+                    },
+                    "probe": {
+                        "id": "[resourceId('Microsoft.Network/loadBalancers/probes/',variables('LB02'),'PB02')]"
+                    }
+                }
+            }
+            
+        ],
+        "probes": [
+            {
+                "name": "PB02",
+                "properties": {
+                    "protocol": "Http",
+                    "port": 80,
+                    "numberOfProbes": 2,
+                    "intervalInSeconds": 10
+                }
+            }
+        ]
+        
+    }
+},
+{
+    "type": "Microsoft.Network/loadBalancers",
+    "apiVersion": "2019-06-01",
+    "name": "[variables('LB03')]",
+    "location": "[parameters('location')]",
+    "sku": {
+        "name": "Standard"
+    },
+    "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnet01'))]"
+    ],
+    "properties": {
+        "frontendIPConfigurations": [
+            {
+                "name": "FE03",
+                "properties": {
+                    "subnet": {
+                        "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets/',variables('vnet01'),'appsub')]"
+                    }
+                }
+            }
+        ],
+        "backendAddressPools": [
+            {
+                "name": "BE03"
+            }
+        ],
+        "loadBalancingRules": [
+            {
+                "name": "LB03-rule01",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations/',variables('LB03'),'FE03')]"
+                    },
+                    "protocol": "All",
+                    "frontendPort": 80,
+                    "backendPort": 80,
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 10,
+                    "backendAddressPool":{
+                        "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools/',variables('LB03'),'BE03')]"
+                    },
+                    "probe": {
+                        "id": "[resourceId('Microsoft.Network/loadBalancers/probes/',variables('LB03'),'PB03')]"
+                    }
+                }
+            }
+            
+        ],
+        "probes": [
+            {
+                "name": "PB03",
+                "properties": {
+                    "protocol": "Http",
+                    "port": 80,
+                    "numberOfProbes": 2,
+                    "intervalInSeconds": 10
+                }
+            }
+        ]
+        
+    }
+},
+{
+    "type": "Microsoft.Compute/virtualMachines",
+    "apiVersion": "2019-07-01",
+    "name": "web01",
+    "location": "[parameters('location')]",
+    "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', concat('sa2021',uniquestring(resourcegroup().id)))]",
+        "[resourceId('Microsoft.Network/networkInterfaces', variables('nic01'))]"
+    ],
+    "properties": {
+        "hardwareProfile": {
+            "vmSize": "[parameters('vmsize')]"
+        },
+        "osProfile": {
+            "computerName": "web01",
+            "adminUsername": "[parameters('adminUsername')]",
+            "adminPassword": "[parameters('adminPassword')]"                       
+        },
+        "storageProfile": {
+            "imageReference": {
+                "publisher": "MicrosoftWindowsServer",
+                "offer": "WindowsServer",
+                "version": "Latest",
+                "sku": "[parameters('WindowsOSversion')]"
+            }
+        },
+        "networkProfile": {
+            "networkInterfaces": [
+                {
+                    "id": "[resourceId('Microsoft.Network/networkInterfaces',variables('nic01'))]"
+                }
+            ]
+        },
+        "diagnosticsProfile": {
+            "bootDiagnostics": {
+                "enabled": true,
+                "storageUri": "[reference(resourceId('Microsoft.Storage/storageAccounts',concat('sa2021',uniquestring(resourcegroup().id)))).primaryEndpoints.blob]"
+            }
+        }
+    }
+},
+{
+    "type": "Microsoft.Compute/virtualMachines",
+    "apiVersion": "2019-07-01",
+    "name": "web02",
+    "location": "[parameters('location')]",
+    "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', variables('nic02'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', concat('sa2021',uniquestring(resourcegroup().id)))]"
+    ],
+    "properties": {
+        "hardwareProfile": {
+            "vmSize": "[parameters('vmsize')]"
+        },
+        "storageProfile": {
+            "imageReference": {
+                "publisher": "MicrosoftWindowsServer",
+                "offer": "WindowsServer",
+                "version": "Latest",
+                "sku": "[parameters('WindowsOSversion')]"
+            }
+        },
+        "networkProfile": {
+            "networkInterfaces": [
+                {
+                    "id": "[resourceId('Microsoft.Network/networkInterfaces',variables('nic02'))]"
+                }
+            ]
+        },
+        "diagnosticsProfile": {
+            "bootDiagnostics": {
+                "enabled": true,
+                "storageUri": "[reference(resourceId('Microsoft.Storage/storageAccounts',concat('sa2021',uniquestring(resourcegroup().id)))).primaryEndpoints.blob]"
+            }
+        }
+    }
+},
+{
+    "type": "Microsoft.Compute/virtualMachines",
+    "apiVersion": "2019-07-01",
+    "name": "app01",
+    "location": "[parameters('location')]",
+    "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', variables('nic03'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', concat('sa2021',uniquestring(resourcegroup().id)))]"
+    ],
+    "properties": {
+        "hardwareProfile": {
+            "vmSize": "[parameters('vmsize')]"
+        },
+        "storageProfile": {
+            "imageReference": {
+                "publisher": "MicrosoftWindowsServer",
+                "offer": "WindowsServer",
+                "version": "Latest",
+                "sku": "[parameters('WindowsOSversion')]"
+            }
+        },
+        "networkProfile": {
+            "networkInterfaces": [
+                {
+                    "id": "[resourceId('Microsoft.Network/networkInterfaces',variables('nic03'))]"
+                }
+            ]
+        },
+        "diagnosticsProfile": {
+            "bootDiagnostics": {
+                "enabled": true,
+                "storageUri": "[reference(resourceId('Microsoft.Storage/storageAccounts',concat('sa2021',uniquestring(resourcegroup().id)))).primaryEndpoints.blob]"
+            }
+        }
+    }
+},
+{
+    "type": "Microsoft.Compute/virtualMachines",
+    "apiVersion": "2019-07-01",
+    "name": "app02",
+    "location": "[parameters('location')]",
+    "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', variables('nic04'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', concat('sa2021',uniquestring(resourcegroup().id)))]"
+    ],
+    "properties": {
+        "hardwareProfile": {
+            "vmSize": "[parameters('vmsize')]"
+        },
+        "storageProfile": {
+            "imageReference": {
+                "publisher": "MicrosoftWindowsServer",
+                "offer": "WindowsServer",
+                "version": "Latest",
+                "sku": "[parameters('WindowsOSversion')]"
+            }
+        },
+        "networkProfile": {
+            "networkInterfaces": [
+                {
+                    "id": "[resourceId('Microsoft.Network/networkInterfaces',variables('nic04'))]"
+                }
+            ]
+        },
+        "diagnosticsProfile": {
+            "bootDiagnostics": {
+                "enabled": true,
+                "storageUri": "[reference(resourceId('Microsoft.Storage/storageAccounts',concat('sa2021',uniquestring(resourcegroup().id)))).primaryEndpoints.blob]"
+            }
+        }
+    }
+},
+{
+    "type": "Microsoft.Compute/virtualMachines",
+    "apiVersion": "2019-07-01",
+    "name": "db01",
+    "location": "[parameters('location')]",
+    "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', variables('nic05'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', concat('sa2021',uniquestring(resourcegroup().id)))]"
+    ],
+    "properties": {
+        "hardwareProfile": {
+            "vmSize": "[parameters('vmsize')]"
+        },
+        "storageProfile": {
+            "imageReference": {
+                "publisher": "MicrosoftWindowsServer",
+                "offer": "WindowsServer",
+                "version": "Latest",
+                "sku": "[parameters('WindowsOSversion')]"
+            }
+        },
+        "networkProfile": {
+            "networkInterfaces": [
+                {
+                    "id": "[resourceId('Microsoft.Network/networkInterfaces',variables('nic05'))]"
+                }
+            ]
+        },
+        "diagnosticsProfile": {
+            "bootDiagnostics": {
+                "enabled": true,
+                "storageUri": "[reference(resourceId('Microsoft.Storage/storageAccounts',concat('sa2021',uniquestring(resourcegroup().id)))).primaryEndpoints.blob]"
+            }
+        }
+    }
+},{
+    "type": "Microsoft.Compute/virtualMachines",
+    "apiVersion": "2019-07-01",
+    "name": "db02",
+    "location": "[parameters('location')]",
+    "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', variables('nic06'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', concat('sa2021',uniquestring(resourcegroup().id)))]"
+    ],
+    "properties": {
+        "hardwareProfile": {
+            "vmSize": "[parameters('vmsize')]"
+        },
+        "storageProfile": {
+            "imageReference": {
+                "publisher": "MicrosoftWindowsServer",
+                "offer": "WindowsServer",
+                "version": "Latest",
+                "sku": "[parameters('WindowsOSversion')]"
+            }
+        },
+        "networkProfile": {
+            "networkInterfaces": [
+                {
+                    "id": "[resourceId('Microsoft.Network/networkInterfaces',variables('nic06'))]"
+                }
+            ]
+        },
+        "diagnosticsProfile": {
+            "bootDiagnostics": {
+                "enabled": true,
+                "storageUri": "[reference(resourceId('Microsoft.Storage/storageAccounts',concat('sa2021',uniquestring(resourcegroup().id)))).primaryEndpoints.blob]"
+            }
+        }
+    }
+}],
+    "outputs": {}
+}
